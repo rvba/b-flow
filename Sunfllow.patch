@@ -1,0 +1,719 @@
+Index: source/blender/render/intern/source/pipeline.c
+===================================================================
+--- source/blender/render/intern/source/pipeline.c	(révision 15355)
++++ source/blender/render/intern/source/pipeline.c	(copie de travail)
+@@ -2247,7 +2247,23 @@
+ 	
+ 	RE_Database_Free(re);
+ }
++/*sunflow*/
++/* SUNFLOW CALL*/
+ 
++static void SunflowRender(Render *re)
++{
++	RE_FreeRenderResult(re->result);
++	re->result= new_render_result(re, &re->disprect, 0, RR_USEMEM);
++	RE_SetCamera(re, re->scene->camera);
++	// switch must be done before prepareScene()
++	YAF_switchSunflowFile();
++	printf("= --==SUNFLOW==-- ============================================================\n");
++	printf("Starting scene conversion.\n");
++	RE_Database_FromScene(re, re->scene, 1);
++	printf("Scene conversion done.\n");
++	YAF_exportScene(re);
++	RE_Database_Free(re);
++}
+ 
+ 
+ #endif /* disable yafray */
+@@ -2283,6 +2299,10 @@
+ #ifndef DISABLE_YAFRAY
+ 		if(re->r.renderer==R_YAFRAY)
+ 			yafrayRender(re);
++		/*sunflow */
++		if(re->r.renderer==R_SUNFLOW)
++			SunflowRender(re);
++		/*wolfsun*/
+ 		else
+ 			do_render_composite_fields_blur_3d(re);
+ #else
+@@ -2399,9 +2419,11 @@
+ 	}
+ 	
+ 	/* renderer */
+-	if(!ELEM(re->r.renderer, R_INTERN, R_YAFRAY)) {
++	/*sunflow*/
++	if(!ELEM3(re->r.renderer, R_INTERN, R_YAFRAY,R_SUNFLOW)) {
+ 		re->error("Unknown render engine set");
+ 		return 0;
++	/*wolfsun*/
+ 	}
+ 	return 1;
+ }
+Index: source/blender/render/intern/source/convertblender.c
+===================================================================
+--- source/blender/render/intern/source/convertblender.c	(révision 15355)
++++ source/blender/render/intern/source/convertblender.c	(copie de travail)
+@@ -3623,6 +3623,12 @@
+ 		lar->YF_glowofs = la->YF_glowofs;
+ 		lar->YF_glowtype = la->YF_glowtype;
+ 	}
++	/*sunflow*/
++	if (re->r.renderer==R_SUNFLOW) {
++		lar->SF_SUN_turbidity = la->SF_SUN_turbidity;
++		lar->SF_SUN_samples = la->SF_SUN_samples;
++	}
++	/*wolfsun*/
+ #endif /* disable yafray */
+ 
+ 	lar->spotsi= la->spotsize;
+Index: source/blender/render/intern/include/render_types.h
+===================================================================
+--- source/blender/render/intern/include/render_types.h	(révision 15355)
++++ source/blender/render/intern/include/render_types.h	(copie de travail)
+@@ -217,6 +217,8 @@
+ 	void (*error)(char *str);
+ 	
+ 	RenderStats i;
++
++
+ };
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -484,6 +486,11 @@
+ 	/* threading */
+ 	int thread_assigned;
+ 	int thread_ready;
++
++	/*sunflow*/
++	float SF_SUN_turbidity;
++	int SF_SUN_samples;
++	/*wolfsun*/
+ } LampRen;
+ 
+ /* **************** defines ********************* */
+Index: source/blender/blenkernel/intern/scene.c
+===================================================================
+--- source/blender/blenkernel/intern/scene.c	(révision 15355)
++++ source/blender/blenkernel/intern/scene.c	(copie de travail)
+@@ -188,6 +188,14 @@
+ 	sce->lay= 1;
+ 	sce->selectmode= SCE_SELECT_VERTEX;
+ 	sce->editbutsize= 0.1;
++
++	sce->r.SF_IRR_samples = 512;
++	sce->r.SF_IRR_tolerance = 0.01; 
++	sce->r.SF_IRR_spacing_1 = 0.05;
++	sce->r.SF_IRR_spacing_2 = 5.0; 
++	sce->r.SF_IRR_global = 1000000;
++	sce->r.SF_IRR_grid_1 = 100;
++	sce->r.SF_IRR_grid_2 = 0.75;
+ 	
+ 	sce->r.mode= R_GAMMA;
+ 	sce->r.cfra= 1;
+Index: source/blender/makesdna/DNA_scene_types.h
+===================================================================
+--- source/blender/makesdna/DNA_scene_types.h	(révision 15355)
++++ source/blender/makesdna/DNA_scene_types.h	(copie de travail)
+@@ -287,6 +287,80 @@
+ 	float GIshadowquality, GIrefinement, GIpower, GIindirpower;
+ 	float YF_gamma, YF_exposure, YF_raybias, YF_AApixelsize, YF_AAthreshold;
+ 
++	/*sunflow*/
++
++	int sunflowmode;
++	int SF_MASK;
++	int SF_MASK_alpha;
++	int SF_MASK_pad;
++
++	int SF_QUICK_uvs;
++	int SF_QUICK_normals;
++	int SF_QUICK_id;
++	int SF_QUICK_prims;
++	int SF_QUICK_gray;
++	int SF_QUICK_wire;
++	int SF_QUICK_ambocc;
++	int SF_QUICK_nogui;
++	
++	int SF_export_mesh;
++	int SF_ipr;
++		
++	int SF_aa_1;
++	int SF_aa_2;
++	int SF_aa_samples;
++	int SF_jitter;
++
++	int SF_GI_type;
++	int SF_GI_view_photons;
++	int SF_GI_view_irradiance;
++	int SF_IGI_samples;
++	int SF_IGI_sets;
++	int SF_IGI_bias_samples;
++
++	int SF_IRR_samples;
++	int SF_IRR_global;
++	int SF_IRR_grid_1;
++
++	int SF_AMB_samples;
++
++	int SF_PATH_samples;
++
++	int SF_DEPTH_diff;
++	int SF_DEPTH_refl;
++	int SF_DEPTH_refr;
++
++	int SF_bucket_size;
++	int SF_bucket_type;
++
++	float SF_IGI_bias;
++	float SF_IRR_tolerance;
++	float SF_IRR_spacing_1;
++	float SF_IRR_spacing_2;
++	float SF_IRR_grid_2;
++
++	float SF_AMB_B_r;
++	float SF_AMB_B_g;
++	float SF_AMB_B_b;
++	float SF_AMB_D_r;
++	float SF_AMB_D_g;
++	float SF_AMB_D_b;
++	float SF_AMB_maxdist;
++
++	float SF_contrast;	
++	float SF_FAKE_x;
++	float SF_FAKE_y;
++	float SF_FAKE_z;
++	float SF_FAKE_S_r;
++	float SF_FAKE_S_g;
++	float SF_FAKE_S_b;
++	float SF_FAKE_G_r;
++	float SF_FAKE_G_g;
++	float SF_FAKE_G_b;
++
++	/*wolfnus*/
++
++
+ 	/* paths to backbufffer, output, ftype */
+ 	char backbuf[160], pic[160];
+ 
+@@ -580,6 +654,7 @@
+ #define R_COSMO			0x1000
+ #define R_ODDFIELD		0x2000
+ #define R_MBLUR			0x4000
++
+ 		/* unified was here */
+ #define R_RAYTRACE      0x10000
+ 		/* R_GAUSS is obsolete, but used to retrieve setting from old files */
+@@ -611,7 +686,12 @@
+ /* yafray: renderer flag (not only exclusive to yafray) */
+ #define R_INTERN	0
+ #define R_YAFRAY	1
++/*sunflow*/
++#define R_SUNFLOW	2
+ 
++#define R_SUNFLOW_MESH 0
++#define R_SUNFLOW_IPR  0
++/*wolfnus*/
+ /* scemode (int now) */
+ #define R_DOSEQ				0x0001
+ #define R_BG_RENDER			0x0002
+Index: source/blender/makesdna/DNA_object_types.h
+===================================================================
+--- source/blender/makesdna/DNA_object_types.h	(révision 15355)
++++ source/blender/makesdna/DNA_object_types.h	(copie de travail)
+@@ -220,6 +220,15 @@
+ 	unsigned int init_state;	/* bit masks of initial state as recorded by the users */
+ 	int pad2;
+ 
++	/*sunflow*/
++	int 	SF_meshlight;
++	float 	SF_meshlight_r;
++	float 	SF_meshlight_g;
++	float 	SF_meshlight_b;
++	int 	SF_meshlight_samples;
++	float 	SF_meshlight_radiance;
++	/*wolfsun*/
++
+ /*#ifdef WITH_VERSE*/
+ 	void *vnode;			/* pointer at object VerseNode */
+ /*#endif*/
+Index: source/blender/makesdna/DNA_lamp_types.h
+===================================================================
+--- source/blender/makesdna/DNA_lamp_types.h	(révision 15355)
++++ source/blender/makesdna/DNA_lamp_types.h	(copie de travail)
+@@ -83,6 +83,9 @@
+ 	/* yafray: glow params */
+ 	float YF_glowint, YF_glowofs;
+ 	short YF_glowtype, YF_pad2;
++	/*sunflow*/
++	float SF_SUN_turbidity;
++	int SF_SUN_samples;
+ 	
+ 	struct MTex *mtex[10];
+ 	struct Ipo *ipo;
+Index: source/blender/makesdna/DNA_material_types.h
+===================================================================
+--- source/blender/makesdna/DNA_material_types.h	(révision 15355)
++++ source/blender/makesdna/DNA_material_types.h	(copie de travail)
+@@ -131,6 +131,13 @@
+ 	/* yafray: absorption color, dispersion parameters and material preset menu */
+ 	float YF_ar, YF_ag, YF_ab, YF_dscale, YF_dpwr;
+ 	int YF_dsmp, YF_preset, YF_djit;
++
++	/*sunflow*/
++	int SF_MAT_type;
++	int SF_MAT_use_texture;
++	int SF_MAT_samples;
++	int SF_MAt_pad;
++	/*wolfsun*/
+ 	
+ 	ScriptLink scriptlink;
+ } Material;
+Index: source/blender/src/buttons_object.c
+===================================================================
+--- source/blender/src/buttons_object.c	(révision 15355)
++++ source/blender/src/buttons_object.c	(copie de travail)
+@@ -2567,9 +2567,21 @@
+ 	int is_libdata = object_is_libdata(ob);
+ 	block= uiNewBlock(&curarea->uiblocks, "object_panel_object", UI_EMBOSS, UI_HELV, curarea->win);
+ 	if(uiNewPanel(curarea, block, "Object and Links", "Object", 0, 0, 318, 204)==0) return;
++
++	/*sunflow*/
++	if (G.scene->r.renderer==R_SUNFLOW)
++       	{
++
++		uiBlockBeginAlign(block);
++
++		uiDefButF(block, COL, B_MATPRV, "", 10, 30, 300, 20, &ob->SF_meshlight_r, 0, 0, 0, B_MATCOL, "");
++		uiDefButBitI(block, TOG,1,B_REDR, "MeshLight",		10,	10,	100,	20, 	 &ob->SF_meshlight, 0, 0, 0, 0, "");
++		uiDefButBitI(block, NUM,1,B_REDR, "Spl",		110,	10,	100,	20,	 &ob->SF_meshlight_samples, 0, 1024, 0, 0, "");
++		uiDefButBitF(block, NUM,1,B_REDR, "Rad",		210,	10,	100,	20,	 &ob->SF_meshlight_radiance, 0.0, 1000.0, 0, 0, "");
++		uiBlockEndAlign(block);
++	}
++	/*wolfsun*/	
+ 	
+-	
+-	
+ 	/* object name */
+ 	uiBlockSetCol(block, TH_BUT_SETTING2);
+ 	uiSetButLock(is_libdata, ERROR_LIBDATA_MESSAGE);
+Index: source/blender/src/buttons_shading.c
+===================================================================
+--- source/blender/src/buttons_shading.c	(révision 15355)
++++ source/blender/src/buttons_shading.c	(copie de travail)
+@@ -2895,6 +2895,17 @@
+ 		if(la->k==0.0) la->k= 1.0;
+ 		uiDefButF(block, NUMSLI,0,"Gamma ",	120,10,180,19,&la->k, 0.001, 2.0, 100, 0, "Set the light gamma correction value");
+ 	}
++	/*sunflow*/
++	if ( la->SF_SUN_turbidity == 0.0 ) la->SF_SUN_turbidity = 6.0;
++	if ( la->SF_SUN_samples == 0.0 ) la->SF_SUN_samples = 128;
++	if ( (la->type==LA_HEMI) & (G.scene->r.renderer==R_SUNFLOW) )
++	{
++		uiBlockBeginAlign(block);
++		uiDefButF(block, NUM,0,"Turbidity",		120,30,180,20,&la->SF_SUN_turbidity, 0.0, 10.0, 0, 0, "");
++		uiDefButI(block, NUM,0,"Samples",		120,10,180,20,&la->SF_SUN_samples, 0.0, 1024.0, 0, 0, "");
++		uiBlockEndAlign(block);
++	}
++	/*wolfsun*/
+ }
+ 
+ 
+@@ -3725,7 +3736,55 @@
+ 	}
+ 
+ }
++/*sunflow*/
++static void material_panel_sunflow(Material *ma)
++{
++	uiBlock *block;
++	char *mstr = "Material Type %t|Difuse %x0|Phong %x1|Shiny %x2|Ward %x3|Glass %x4|Mirror %x5|Constant %x6|Ambient Occlusion %x7|Uber %x8|Wireframe %x9|Plug In %x10|User %x11";
+ 
++	/* better to use same name as original panel */
++	block= uiNewBlock(&curarea->uiblocks, "Sunflow", UI_EMBOSS, UI_HELV, curarea->win);
++	uiNewPanelTabbed("Shaders", "Material");
++	if(uiNewPanel(curarea, block, "Sunflow", "Material", 640, 0, 318, 204)==0) return;
++	uiSetButLock(ma->id.lib!=NULL, ERROR_LIBDATA_MESSAGE);
++	//uiDefBut(block, LABEL, 0, "Type", 				10,	180,	100,	20,	0, 0.0, 0.0, 0, 0, "");
++
++	uiBlockBeginAlign(block);
++	// MATERIAL
++	uiDefButI(block, MENU, B_MAT_YF_PRESET, mstr, 			10,	180,	200,	20,	&ma->SF_MAT_type, 0.0, 0.0, 0, 0, "");
++	// TEXTURE
++	uiDefButBitI(block, TOGN, 1, B_MATPRV, "Use Texture",		10,	160,	200,	20,	&ma->SF_MAT_use_texture, 0.0, 1.0, 1, 0, "");
++	uiBlockEndAlign(block);
++
++	if ( ma->SF_MAT_type > 0 )
++	{
++		uiBlockBeginAlign(block);
++
++		uiDefButI(block, NUM, B_MATPRV, "Samples  ", 		10,	120,	200,	20,	&(ma->SF_MAT_samples), 0.0, 1024.0, 100, 0, "");	
++
++		//SHINY 
++		if ( ( ma->SF_MAT_type == 2 )  )
++		{
++			uiDefButF(block, NUMSLI, B_MATPRV, "Refl  ",	10,	100,	200,	20,	&(ma->ray_mirror), 0.0, 1.0, 100, 2, "");
++		}
++		// WARD
++		if ( ma->SF_MAT_type == 3 )
++		{
++			uiDefButF(block, NUMSLI, B_MATPRV, "Rough  ",	10,	100,	200,	20,	&(ma->gloss_mir), 1.0, 5.0, 10, 2, "");
++			uiDefButF(block, NUMSLI, B_MATPRV, "rough  ",	10,	80,	200,	20,	&(ma->adapt_thresh_mir), 1.0, 5.0, 10, 2, "");
++		}
++		// GLASS
++		if ( ma->SF_MAT_type == 4 )
++		{
++			uiDefButF(block, NUMSLI, B_MATPRV, "IOR  ",	10,	100,	200,	20,	&(ma->ang), 1.0, 30.0, 100, 2, "");
++			//uiDefButF(block, NUMSLI, B_MATPRV, "Dist  ",	10,	80,	200,	20,	&(ma->alpha), 1.0, 5.0, 10, 2, "");
++
++		uiBlockEndAlign(block);
++
++		}
++	}
++}
++/*wolfsun*/
+ static void material_sss_preset_cb(void *material_v, void *unused_v)
+ {
+ 	static const float presets[11][7] = {
+@@ -4307,6 +4366,12 @@
+ 			
+ 			if (G.scene->r.renderer==R_INTERN)
+ 				material_panel_tramir(ma);
++			/*sunflow*/
++			if (G.scene->r.renderer==R_SUNFLOW)
++			{
++				material_panel_sunflow(ma);
++			}
++			/*wolfsun*/
+ 			else {
+ 				if(ma->YF_ar==0.f) {
+ 					ma->YF_ar = ma->YF_ag = ma->YF_ab = 1;
+Index: source/blender/src/buttons_scene.c
+===================================================================
+--- source/blender/src/buttons_scene.c	(révision 15355)
++++ source/blender/src/buttons_scene.c	(copie de travail)
+@@ -112,6 +112,10 @@
+ #include <ffmpeg/avformat.h>
+ #include <ffmpeg/opt.h>
+ 
++/* sunflow*/
++#include "DNA_text_types.h"
++/* */
++
+ static int ffmpeg_preset_sel = 0;
+ 
+ extern int is_container(int);
+@@ -2001,13 +2005,13 @@
+ 		);
+ 	}
+ 
+-#ifdef WITH_OPENEXR
++//#ifdef WITH_OPENEXR
+ 	strcpy(formatstring, "|%s %%x%d");
+ 	sprintf(appendstring, formatstring, "OpenEXR", R_OPENEXR);
+ 	strcat(string, appendstring);
+ 	sprintf(appendstring, formatstring, "MultiLayer", R_MULTILAYER);
+ 	strcat(string, appendstring);
+-#endif
++//#endif
+ 	
+ 	if (G.have_libtiff) {
+ 		strcpy(formatstring, "|%s %%x%d");
+@@ -2209,7 +2213,7 @@
+ 	uiDefBut(block, BUT,B_DORENDER,"RENDER",	369, 164, 191,37, 0, 0, 0, 0, 0, "Render the current frame (F12)");
+ #ifndef DISABLE_YAFRAY
+ 	/* yafray: on request, render engine menu is back again, and moved to Render panel */
+-	uiDefButS(block, MENU, B_SWITCHRENDER, "Rendering Engine %t|Blender Internal %x0|YafRay %x1", 
++	uiDefButS(block, MENU, B_SWITCHRENDER, "Rendering Engine %t|Blender Internal %x0|YafRay %x1|SunFlow %x2", 
+ 												369, 142, 191, 20, &G.scene->r.renderer, 0, 0, 0, 0, "Choose rendering engine");	
+ #else
+ 	uiDefButS(block, MENU, B_SWITCHRENDER, "Rendering Engine %t|Blender Internal %x0", 
+@@ -3226,6 +3230,154 @@
+ 		uiDefButF(block, NUMSLI, B_DIFF, "Thr ", 160,90,150,20, &G.scene->r.YF_AAthreshold, 0.000001, 1.0, 0, 0, "AA threshold");
+ 	}
+ }
++/*sunflow*/
++static void render_panel_sunflowGlobal()
++{
++	uiBlock *block;
++
++	block= uiNewBlock(&curarea->uiblocks, "render_panel_sunflowGlobal", UI_EMBOSS, UI_HELV, curarea->win);
++	uiNewPanelTabbed("Render", "Render");
++	if(uiNewPanel(curarea, block, "SunFlow", "Render", 320, 0, 318, 204)==0) return;
++
++	// label to force a boundbox for buttons not to be centered
++	//uiDefBut(block, LABEL, 0, " ", 305,180,10,10, 0, 0, 0, 0, 0, "");
++
++	// x y lenght width
++	
++	// MESH IPR GI
++       	uiDefButI(block, MENU, B_REDR, "GiMethod %t|Instant GI %x0|Irradiance Catching %x1|Path Tracing %x2|Ambient Occlusion %x3|Fake Ambient %x4|None %x5|",//GI type
++		       						5,	180,	305,	20,	&G.scene->r.SF_GI_type, 0, 0, 0, 0, "");
++
++	if ( G.scene->r.SF_MASK ) G.scene->r.SF_GI_type = 5;
++	if ( G.scene->r.imtype == 0  ){ G.scene->r.SF_QUICK_nogui = 1 ; G.scene->r.SF_ipr = 1 ; }//tga 
++	//if ( G.scene->r.imtype == 17 ){ G.scene->r.SF_QUICK_nogui = 1 ; G.scene>r.SF_ipr = 0 ; }//png
++	if ( G.scene->r.imtype == 23 ){ G.scene->r.SF_QUICK_nogui = 1 ; G.scene->r.SF_ipr = 1 ; }//exr
++	if ( G.scene->r.imtype == 21 ){ G.scene->r.SF_QUICK_nogui = 1 ; G.scene->r.SF_ipr = 1 ; }//hdr
++
++	uiBlockBeginAlign(block);
++
++	// AA
++	uiDefButI(block, NUM, B_DIFF, "aa",			 5,	155,	75,	20,	&G.scene->r.SF_aa_1, 0.0, 256.0, 10, 10, "");
++	uiDefButI(block, NUM, B_DIFF, "aa",			 80,	155,	75,	20,	&G.scene->r.SF_aa_2, 1.0, 256.0, 10, 10, "");
++	uiDefButI(block, NUM, B_DIFF, "sp",			 160,	155,	75,	20,	&G.scene->r.SF_aa_samples, 1.0, 256.0, 10, 10, "");
++
++	// bucket
++       	uiDefButI(block, MENU, B_REDR, "Type %t|Hilbert%x0|Spiral%x1|Column%x2|Row%x3|Diagonal%x4|Random%x5|",
++		       						235,	155,	75,	20,	&G.scene->r.SF_bucket_type, 0, 0, 0, 0, "");
++	// DEPTH 
++	uiDefButI(block, NUM, B_DIFF, "Diff",			 5,	130,	75,	20,	&G.scene->r.SF_DEPTH_diff, 1.0, 80.0, 10, 10, "");
++	uiDefButI(block, NUM, B_DIFF, "Refl",			 80,	130,	75,	20,	&G.scene->r.SF_DEPTH_refl, 1.0, 80.0, 10, 10, "");
++	uiDefButI(block, NUM, B_DIFF, "Refr",			 160,	130,	75,	20,	&G.scene->r.SF_DEPTH_refr, 1.0, 80.0, 10, 10, "");
++
++	//bucket
++	uiDefButI(block, NUM, B_DIFF, "bk",			235,	130,	75,	20,	&G.scene->r.SF_bucket_size, 1.0, 256.0, 10, 10, "");
++
++	uiBlockEndAlign(block);
++
++	// TOGGLES
++	uiBlockBeginAlign(block);
++	uiDefButBitI(	block, TOGN, 1, B_REDR, "mesh",		5,	30,	75,	20,	&G.scene->r.SF_export_mesh , 0, 0, 0, 0, "export mesh");
++	uiDefButBitI(	block, TOGN, 1, B_REDR, "ipr", 		80,	30,	75,	20,	&G.scene->r.SF_ipr , 0, 0, 0, 0, "Progressive render");
++	uiDefButBitI(	block, TOG, 1, B_REDR, "mask", 		155,	30,	75,	20,	&G.scene->r.SF_MASK , 0, 0, 0, 0, "masks");
++	uiDefButBitI(block, TOG, 1, B_REDR, "Jitter ",		230,	30,	75,	20,	&G.scene->r.SF_jitter , 0, 0, 0, 0, "jitter");
++
++	uiDefButBitI(block, TOGN, 1, B_REDR, "GUI",		5,	10,	25,	20,	&G.scene->r.SF_QUICK_nogui , 0, 0, 0, 0, "No GUI");
++	uiDefButBitI(block, TOG, 1, B_REDR, "PHO",		30,	10,	25,	20,	&G.scene->r.SF_GI_view_photons , 0, 0, 0, 0, "show photons");
++	uiDefButBitI(block, TOG, 1, B_REDR, "IRR",		55,	10,	25,	20,	&G.scene->r.SF_GI_view_irradiance , 0, 0, 0, 0, "show irradiance");
++
++	uiDefButBitI(block, TOG, 1, B_REDR, "ID",		80,	10,	25,	20,	&G.scene->r.SF_QUICK_id , 0, 0, 0, 0, "ID");
++	uiDefButBitI(block, TOG, 1, B_REDR, "UV",		105,	10,	25,	20,	&G.scene->r.SF_QUICK_uvs , 0, 0, 0, 0, "UVs");
++	uiDefButBitI(block, TOG, 1, B_REDR, "WI",		130,	10,	25,	20,	&G.scene->r.SF_QUICK_wire , 0, 0, 0, 0, "Wire");
++
++	uiDefButBitI(block, TOG, 1, B_REDR, "NOR",		155,	10,	25,	20,	&G.scene->r.SF_QUICK_normals , 0, 0, 0, 0, "Normals");
++	uiDefButBitI(block, TOG, 1, B_REDR, "PRI",		180,	10,	25,	20,	&G.scene->r.SF_QUICK_prims , 0, 0, 0, 0, "Prims");
++	uiDefButBitI(block, TOG, 1, B_REDR, "GR",		205,	10,	25,	20,	&G.scene->r.SF_QUICK_gray , 0, 0, 0, 0, "Gray");
++
++	uiDefButBitI(block, TOG, 1, B_REDR, "AM",		230,	10,	25,	20,	&G.scene->r.SF_QUICK_ambocc , 0, 0, 0, 0, "Ambient Occ");
++	uiDefButBitI(block, TOG, 1, B_REDR, "",			255,	10,	25,	20,	&G.scene->r.SF_QUICK_ambocc , 0, 0, 0, 0, "");
++	uiDefButBitI(block, TOG, 1, B_REDR, "A",		280,	10,	25,	20,	&G.scene->r.SF_MASK_alpha, 0, 0, 0, 0, "");
++
++	uiBlockEndAlign(block);
++
++	// IGI 
++	if(G.scene->r.SF_GI_type == 0)
++	{
++
++	uiBlockBeginAlign(block);
++	uiDefButI(block, NUM, B_DIFF, "Samples",		5,	105,	150,	20,	&G.scene->r.SF_IGI_samples, 1.0, 2048.0, 10, 10, "");
++	uiDefButI(block, NUM, B_DIFF, "Sets",			160,	105,	150,	20,	&G.scene->r.SF_IGI_sets, 1.0, 255.0, 10, 10, "");
++
++	uiDefButF(block, NUMSLI, B_DIFF,"Bias ",		5,	80,	150,	20,	&G.scene->r.SF_IGI_bias,0.0, 3.0 ,0,0, "");
++	uiDefButI(block, NUM, B_DIFF, "Bias samples",		160,	80,	150,	20,	&G.scene->r.SF_IGI_bias_samples, 0.0, 2048.0, 10, 10, "");
++	uiBlockEndAlign(block);
++
++	}
++	//
++	// IRRADIANCE CACHING 
++	if(G.scene->r.SF_GI_type == 1)
++	{
++
++	uiBlockBeginAlign(block);
++
++	uiDefButI(block, NUM, B_DIFF, "Samples",		5,	105,	150,	20,	&G.scene->r.SF_IRR_samples, 1.0, 2048.0, 10, 10, "samples");
++	uiDefButF(block, NUMSLI, B_DIFF, "tol. ",		160,	105,	150,	20,	&G.scene->r.SF_IRR_tolerance, 0.0, 1.0, 0, 0, "tolerance");
++
++	uiDefButF(block, NUMSLI, B_DIFF,"spc. ",			5,	80,	150,	20,	&G.scene->r.SF_IRR_spacing_1,0.0, 1.0 ,0,0, "spacing");
++	uiDefButF(block, NUMSLI, B_DIFF,"spc. ",			160,	80,	150,	20,	&G.scene->r.SF_IRR_spacing_2,0.0, 10.0, 10, 10, "spacing");
++
++	uiDefButI(block, NUM, B_DIFF, "global",			5,	55,	150,	20,	&G.scene->r.SF_IRR_global, 0.1, 1000.0, 10, 10, "global");
++	uiDefButI(block, NUM, B_DIFF, "g ",			160,	55,	75,	20,	&G.scene->r.SF_IRR_grid_1, 0.0, 500.0, 10, 10, "grid");
++	uiDefButF(block, NUMSLI, B_DIFF, "g ",			235,	55,	75,	20,	&G.scene->r.SF_IRR_grid_2, 0.0, 5.0, 10, 10, "grid");
++
++	uiBlockEndAlign(block);
++
++	}
++
++	// PATH TRACING 
++	if(G.scene->r.SF_GI_type == 2)
++	{
++	uiDefButI(block, NUM, B_DIFF, "Samples",		5,	105,	305,	20,	&G.scene->r.SF_PATH_samples, 1.0, 512.0, 10, 10, "");
++	}
++
++
++	// AMBIENT OCCLUSION 
++	if(G.scene->r.SF_GI_type == 3)
++	{
++	uiBlockBeginAlign(block);
++	
++	uiDefButF(block, COL, B_MATPRV, "",			5,	105,	150,	20, &G.scene->r.SF_AMB_B_r, 0, 0, 0, B_MATCOL, "");
++	uiDefButF(block, COL, B_MATPRV, "",			160,	105,	150,	20, &G.scene->r.SF_AMB_D_r, 0, 0, 0, B_MATCOL, "");
++
++	uiBlockEndAlign(block);
++
++	uiBlockBeginAlign(block);
++
++	uiDefButI(block, NUM, B_DIFF, "Samples   ",		5,	80,	305,	20,	&G.scene->r.SF_AMB_samples, 1.0, 1024.0, 10, 10, "");
++	uiDefButF(block, NUMSLI, B_DIFF, "Max Dist  ",		5,	55,	305,	20,	&G.scene->r.SF_AMB_maxdist, 0.0, 100.0, 10, 10, "");
++
++	uiBlockEndAlign(block);
++	}
++
++	// FAKE AMBIENT 
++	if(G.scene->r.SF_GI_type == 4)
++	{
++	uiBlockBeginAlign(block);
++
++	uiDefButF(block, COL, B_MATPRV, "",			5,	105,	150,	20, &G.scene->r.SF_FAKE_S_r, 0, 0, 0, B_MATCOL, "sky");
++	uiDefButF(block, COL, B_MATPRV, "",			160,	105,	150,	20, &G.scene->r.SF_FAKE_G_r, 0, 0, 0, B_MATCOL, "ground");
++
++	uiDefButF(block, NUMSLI, B_DIFF, "X",			5,	85,	102,	20,	&G.scene->r.SF_FAKE_x, 0.0, 1.0, 10, 10, "");
++	uiDefButF(block, NUMSLI, B_DIFF, "Y",			107,	85,	102,	20,	&G.scene->r.SF_FAKE_y, 0.0, 1.0, 10, 10, "");
++	uiDefButF(block, NUMSLI, B_DIFF, "Z",			207,	85,	103,	20,	&G.scene->r.SF_FAKE_z, 0.0, 1.0, 10, 10, "");
++
++	uiBlockEndAlign(block);
++	}
++
++}
++static void render_panel_sunflowGI()
++{
++	return;
++}
+ #endif /* disable yafray stuff */
+ 
+ static void layer_copy_func(void *lay_v, void *lay_p)
+@@ -3442,6 +3594,38 @@
+ 		render_panel_yafrayGlobal();
+ 		render_panel_yafrayGI();
+ 	}
++	/*sunflow*/
++	if (G.scene->r.renderer==R_SUNFLOW) {
++
++		if (G.scene->r.SF_DEPTH_diff==0) G.scene->r.SF_DEPTH_diff = 1;
++		if (G.scene->r.SF_DEPTH_refl==0) G.scene->r.SF_DEPTH_refl = 4;
++		if (G.scene->r.SF_DEPTH_refr==0) G.scene->r.SF_DEPTH_refr = 4;
++
++		if (G.scene->r.SF_aa_1==0) G.scene->r.SF_aa_1 = 0;
++		if (G.scene->r.SF_aa_2==0) G.scene->r.SF_aa_2 = 2;
++		if (G.scene->r.SF_aa_samples==0) G.scene->r.SF_aa_samples = 1;
++		if (G.scene->r.SF_bucket_size==0) G.scene->r.SF_bucket_size = 64;
++
++
++		// IGI
++		if (G.scene->r.SF_IGI_samples==0) 		G.scene->r.SF_IGI_samples = 64 ;
++		if (G.scene->r.SF_IGI_sets==0) 			G.scene->r.SF_IGI_sets = 1 ;
++		if (G.scene->r.SF_IGI_bias==0.0) 		G.scene->r.SF_IGI_bias = 0.01 ;
++		if (G.scene->r.SF_IGI_bias_samples==0) 		G.scene->r.SF_IGI_bias_samples = 0 ;
++/*
++		// IRR
++		if ( G.scene->r.SF_IRR_samples == 0 )  		G.scene->r.SF_IRR_samples == 512 ; 
++		if ( G.scene->r.SF_IRR_tolerance == 0.0 ) 	G.scene->r.SF_IRR_tolerance == 0.01 ; 
++		if ( G.scene->r.SF_IRR_spacing_1 == 0.0 )  	G.scene->r.SF_IRR_spacing_1 == 0.05 ;
++		if ( G.scene->r.SF_IRR_spacing_2 == 0.0 ) 	G.scene->r.SF_IRR_spacing_2 == 5.0 ;
++		if ( G.scene->r.SF_IRR_global == 0 )  		G.scene->r.SF_IRR_global == 1000000  ;
++		if ( G.scene->r.SF_IRR_grid_1 == 0 ) 		G.scene->r.SF_IRR_grid_1 == 100  ;
++		if (G.scene->r.SF_IRR_grid_2 == 0.0 ) 		G.scene->r.SF_IRR_grid_2 == 0.75  ;
++*/
++		// PANELS
++		render_panel_sunflowGlobal();
++		render_panel_sunflowGI();
++	}
+ #endif
+ 
+ }
+@@ -3493,5 +3677,3 @@
+ 	sound_panel_sequencer();
+ }
+ 
+-
+-
+Index: source/blender/yafray/intern/api.cpp
+===================================================================
+--- source/blender/yafray/intern/api.cpp	(révision 15355)
++++ source/blender/yafray/intern/api.cpp	(copie de travail)
+@@ -1,14 +1,21 @@
+ #include "export_File.h"
+ #include "export_Plugin.h"
++/* */
++#include "exportSunflow_File.h"
+ 
+ static yafrayFileRender_t byfile;
+ static yafrayPluginRender_t byplugin;
++static SunflowFileRender_t bysunflowfile;
+ 
++
+ yafrayRender_t *YAFBLEND = &byplugin;
+ 
+ extern "C"
+ {
++	/* */
+ 	void YAF_switchPlugin() { YAFBLEND = &byplugin; }
+ 	void YAF_switchFile() { YAFBLEND = &byfile; }
++	void YAF_switchSunflowFile() {YAFBLEND=&bysunflowfile;}
++
+ 	int YAF_exportScene(Render* re) { return (int)YAFBLEND->exportScene(re); }
+ }
+Index: source/blender/yafray/YafRay_Api.h
+===================================================================
+--- source/blender/yafray/YafRay_Api.h	(révision 15355)
++++ source/blender/yafray/YafRay_Api.h	(copie de travail)
+@@ -7,7 +7,9 @@
+ #endif
+ 	void YAF_switchPlugin();
+ 	void YAF_switchFile();
++	void YAF_switchSunflowFile();
+ 	int YAF_exportScene(Render* re);
++	/* */
+ #ifdef __cplusplus
+ }
+ #endif
+Index: config/linux2-config.py
+===================================================================
+--- config/linux2-config.py	(révision 15355)
++++ config/linux2-config.py	(copie de travail)
+@@ -11,7 +11,7 @@
+ BF_PYTHON_LIB = 'python${BF_PYTHON_VERSION}' #BF_PYTHON+'/lib/python'+BF_PYTHON_VERSION+'/config/libpython'+BF_PYTHON_VERSION+'.a'
+ BF_PYTHON_LINKFLAGS = ['-Xlinker', '-export-dynamic']
+ 
+-WITH_BF_OPENAL = 'true'
++WITH_BF_OPENAL = 'false'
+ BF_OPENAL = '/usr'
+ BF_OPENAL_INC = '${BF_OPENAL}/include'
+ BF_OPENAL_LIB = 'openal'
+@@ -27,7 +27,7 @@
+ WITH_BF_FMOD = 'false'
+ BF_FMOD = LIBDIR + '/fmod'
+ 
+-WITH_BF_OPENEXR = 'true'
++WITH_BF_OPENEXR = 'false'
+ BF_OPENEXR = '/usr'
+ # when compiling with your own openexr lib you might need to set...
+ # BF_OPENEXR_INC = '${BF_OPENEXR}/include/OpenEXR ${BF_OPENEXR}/include'
+@@ -56,7 +56,7 @@
+ BF_ZLIB_INC = '${BF_ZLIB}/include'
+ BF_ZLIB_LIB = 'z'
+ 
+-WITH_BF_INTERNATIONAL = 'true'
++WITH_BF_INTERNATIONAL = 'false'
+ 
+ BF_GETTEXT = '/usr'
+ BF_GETTEXT_INC = '${BF_GETTEXT}/include'
+@@ -75,7 +75,7 @@
+ BF_ODE_INC = BF_ODE + '/include'
+ BF_ODE_LIB = BF_ODE + '/lib/libode.a'
+ 
+-WITH_BF_BULLET = 'true'
++WITH_BF_BULLET = 'false'
+ BF_BULLET = '#extern/bullet2/src'
+ BF_BULLET_INC = '${BF_BULLET}'
+ BF_BULLET_LIB = 'extern_bullet'
+@@ -121,7 +121,7 @@
+ WITH_BF_BINRELOC = 'true'
+ 
+ # enable ffmpeg  support
+-WITH_BF_FFMPEG = 'true'  # -DWITH_FFMPEG
++WITH_BF_FFMPEG = 'false'  # -DWITH_FFMPEG
+ BF_FFMPEG = '#extern/ffmpeg'
+ BF_FFMPEG_LIB = ''
+ # Uncomment the following two lines to use system's ffmpeg
